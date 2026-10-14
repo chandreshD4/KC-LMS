@@ -9,19 +9,29 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.ScrollView;
+import android.app.AlertDialog;
+import android.content.SharedPreferences;
+
 import android.widget.TextView;
+import android.widget.EditText;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
 
-    private final int navy = Color.rgb(17, 27, 54);
-    private final int blue = Color.rgb(54, 100, 244);
-    private final int bg = Color.rgb(246, 248, 253);
-    private final int muted = Color.rgb(116, 126, 148);
-    private final int ink = Color.rgb(30, 41, 68);
+    private int navy = Color.rgb(17, 27, 54);
+    private int blue = Color.rgb(54, 100, 244);
+    private int bg = Color.rgb(246, 248, 253);
+    private int muted = Color.rgb(116, 126, 148);
+    private int ink = Color.rgb(30, 41, 68);
+    private int surface = Color.WHITE;
+    private boolean darkMode = false;
     private LinearLayout root;
     private LinearLayout bottomNav;
+private FrameLayout frame;
+private LinearLayout drawer;
+private SharedPreferences prefs;
 
     private int dp(float n) {
         return (int) (n * getResources().getDisplayMetrics().density + 0.5f);
@@ -76,7 +86,7 @@ public class MainActivity extends Activity {
 
     private void line(LinearLayout parent) {
         View v = new View(this);
-        v.setBackgroundColor(Color.rgb(235, 238, 246));
+        v.setBackgroundColor(darkMode ? Color.rgb(54, 64, 85) : Color.rgb(235, 238, 246));
         parent.addView(v, new LinearLayout.LayoutParams(
             -1, dp(1)
         ));
@@ -96,15 +106,26 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(navy);
-        getWindow().setNavigationBarColor(Color.WHITE);
-        getWindow().getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        );
         showHome();
     }
 
     private void showHome() {
+        prefs = getSharedPreferences("kc_lms_settings", MODE_PRIVATE);
+        darkMode = prefs.getBoolean("dark_mode", false);
+
+        navy = darkMode ? Color.rgb(10, 16, 32) : Color.rgb(17, 27, 54);
+        blue = Color.rgb(54, 100, 244);
+        bg = darkMode ? Color.rgb(15, 20, 34) : Color.rgb(246, 248, 253);
+        muted = darkMode ? Color.rgb(166, 178, 201) : Color.rgb(116, 126, 148);
+        ink = darkMode ? Color.rgb(235, 240, 250) : Color.rgb(30, 41, 68);
+        surface = darkMode ? Color.rgb(29, 37, 56) : Color.WHITE;
+
+        getWindow().setStatusBarColor(navy);
+        getWindow().setNavigationBarColor(bg);
+        getWindow().getDecorView().setSystemUiVisibility(
+            darkMode ? 0 : View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        );
+
         LinearLayout screen = column();
         screen.setBackgroundColor(bg);
 
@@ -127,7 +148,11 @@ public class MainActivity extends Activity {
         buildRecentSection();
 
         buildBottomNav(screen);
-        setContentView(screen);
+
+        frame = new FrameLayout(this);
+        frame.addView(screen, new FrameLayout.LayoutParams(-1, -1));
+        buildDrawer();
+        setContentView(frame);
     }
 
     private void buildHeader() {
@@ -144,20 +169,35 @@ public class MainActivity extends Activity {
         LinearLayout names = column();
         pad(names, 11, 0, 0, 0);
         names.addView(label("KC LMS", 21, navy, true));
-        names.addView(label("PRIVATE MEDIA SPACE", 9, muted, true));
+        names.addView(label(t("PRIVATE MEDIA SPACE"), 9, muted, true));
         header.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
 
-        TextView profile = label("CR", 14, blue, true);
-        profile.setGravity(Gravity.CENTER);
-        profile.setBackground(shape(Color.rgb(227, 235, 255), 50));
-        header.addView(profile, lp(43, 43));
+        TextView menu = label("☰", 25, Color.WHITE, true);
+        menu.setGravity(Gravity.CENTER);
+        menu.setBackground(shape(Color.rgb(40, 55, 91), 14));
+        header.addView(menu, lp(46, 46));
+        menu.setOnClickListener(v -> openDrawer());
 
         root.addView(header);
-        gap(root, 24);
+        gap(root, 14);
+
+        LinearLayout search = row();
+        pad(search, 14, 0, 12, 0);
+        search.setBackground(shape(surface, 15));
+        TextView searchIcon = label("⌕", 25, muted, true);
+        search.addView(searchIcon);
+        TextView searchText = label(t("Search files, folders..."), 13, muted, false);
+        pad(searchText, 10, 0, 0, 0);
+        search.addView(searchText, new LinearLayout.LayoutParams(0, dp(48), 1));
+        TextView filter = label("☷", 21, blue, true);
+        search.addView(filter);
+        root.addView(search);
+        search.setOnClickListener(v -> toast("Search will be connected to the media browser."));
+        gap(root, 20);
     }
 
     private void buildWelcome() {
-        root.addView(label("Your personal space", 25, navy, true));
+        root.addView(label(t("Your personal space"), 25, navy, true));
         gap(root, 4);
         root.addView(label(
             "Your files. Your privacy. Your control.",
@@ -183,7 +223,7 @@ public class MainActivity extends Activity {
 
         LinearLayout titleBox = column();
         pad(titleBox, 13, 0, 0, 0);
-        titleBox.addView(label("Connect a device", 18, Color.WHITE, true));
+        titleBox.addView(label(t("Connect a device"), 18, Color.WHITE, true));
         gap(titleBox, 4);
         titleBox.addView(label(
             "Access your media remotely",
@@ -194,7 +234,7 @@ public class MainActivity extends Activity {
         card.addView(top);
         gap(card, 17);
 
-        TextView button = label("＋   Connect another device     →", 14,
+        TextView button = label(t("＋   Connect another device     →"), 14,
             navy, true);
         button.setGravity(Gravity.CENTER);
         button.setBackground(shape(Color.WHITE, 14));
@@ -222,21 +262,21 @@ public class MainActivity extends Activity {
     }
 
     private void buildMediaSection() {
-        sectionHeading("Browse media", "View all", () ->
+        sectionHeading(t("Browse media"), "View all", () ->
             toast("Media browser will be added later.")
         );
 
         LinearLayout first = row();
         LinearLayout second = row();
 
-        addMediaTile(first, "▧", "Photos", "Images",
+        addMediaTile(first, "▧", t("Photos"), "Images",
             Color.rgb(229, 237, 255), blue);
-        addMediaTile(first, "▷", "Videos", "Movies",
+        addMediaTile(first, "▷", t("Videos"), "Movies",
             Color.rgb(255, 233, 226), Color.rgb(233, 100, 74));
 
-        addMediaTile(second, "♫", "Audio", "Music & sounds",
+        addMediaTile(second, "♫", t("Audio"), "Music & sounds",
             Color.rgb(235, 229, 255), Color.rgb(127, 86, 220));
-        addMediaTile(second, "▤", "Documents", "PDF & files",
+        addMediaTile(second, "▤", t("Documents"), "PDF & files",
             Color.rgb(220, 246, 235), Color.rgb(32, 153, 106));
 
         root.addView(first);
@@ -250,7 +290,7 @@ public class MainActivity extends Activity {
                               int tint, int accent) {
         LinearLayout card = column();
         pad(card, 14, 15, 10, 14);
-        card.setBackground(shape(Color.WHITE, 19));
+        card.setBackground(shape(surface, 19));
         card.setElevation(dp(1));
 
         TextView icon = label(symbol, 25, accent, true);
@@ -274,18 +314,18 @@ public class MainActivity extends Activity {
     }
 
     private void buildFoldersSection() {
-        sectionHeading("My folders", "+ New folder", () ->
+        sectionHeading(t("My folders"), "+ New folder", () ->
             toast("Folder creation will be added later.")
         );
 
         LinearLayout card = column();
         pad(card, 15, 3, 15, 3);
-        card.setBackground(shape(Color.WHITE, 19));
+        card.setBackground(shape(surface, 19));
 
-        addFolderRow(card, "▰", "Private collection",
+        addFolderRow(card, "▰", t("Private collection"),
             "Password-protected folder", blue);
         line(card);
-        addFolderRow(card, "▰", "Shared with devices",
+        addFolderRow(card, "▰", t("Shared with devices"),
             "Your selected media folders", Color.rgb(127, 86, 220));
 
         root.addView(card);
@@ -319,21 +359,21 @@ public class MainActivity extends Activity {
     }
 
     private void buildRecentSection() {
-        sectionHeading("Recent media", "See all", () ->
+        sectionHeading(t("Recent media"), "See all", () ->
             toast("Recent media will appear when file access is implemented.")
         );
 
         LinearLayout empty = column();
         empty.setGravity(Gravity.CENTER);
         pad(empty, 15, 22, 15, 22);
-        empty.setBackground(shape(Color.WHITE, 19));
+        empty.setBackground(shape(surface, 19));
 
         TextView icon = label("▤", 30, blue, true);
         icon.setGravity(Gravity.CENTER);
         empty.addView(icon, lp(56, 52));
 
         gap(empty, 8);
-        TextView title = label("Your recent files will appear here",
+        TextView title = label(t("Your recent files will appear here"),
             14, ink, true);
         title.setGravity(Gravity.CENTER);
         empty.addView(title);
@@ -352,14 +392,15 @@ public class MainActivity extends Activity {
 
     private void buildBottomNav(LinearLayout screen) {
         bottomNav = row();
-        bottomNav.setBackgroundColor(Color.WHITE);
+        bottomNav.setBackgroundColor(surface);
         bottomNav.setElevation(dp(12));
         pad(bottomNav, 5, 7, 5, 7);
 
-        addNavItem("⌂", "Home", true);
-        addNavItem("▤", "Files", false);
-        addNavItem("↔", "Devices", false);
-        addNavItem("⚙", "Settings", false);
+        addNavItem("⌂", t("Home"), true);
+        addNavItem("▤", t("Files"), false);
+        addNavItem("⌕", t("Search"), false);
+        addNavItem("↔", t("Devices"), false);
+        addNavItem("⚙", t("Settings"), false);
 
         screen.addView(bottomNav, new LinearLayout.LayoutParams(-1, dp(66)));
     }
@@ -382,10 +423,370 @@ public class MainActivity extends Activity {
             new LinearLayout.LayoutParams(0, -1, 1));
 
         item.setOnClickListener(v -> {
-            if (!title.equals("Home")) {
+            if (title.equals(t("Search"))) {
+                showSearch();
+            } else if (!title.equals(t("Home"))) {
                 toast(title + " screen will be implemented later.");
             }
         });
+    }
+
+
+    private void buildDrawer() {
+        drawer = column();
+        drawer.setBackgroundColor(surface);
+        drawer.setElevation(dp(18));
+        pad(drawer, 20, 24, 20, 18);
+
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+            dp(310), -1, Gravity.LEFT
+        );
+        params.leftMargin = -dp(310);
+        frame.addView(drawer, params);
+        drawer.setTag(params);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout items = column();
+        scroll.addView(items);
+
+        LinearLayout brand = column();
+        pad(brand, 16, 18, 16, 18);
+        brand.setBackground(gradient(navy, Color.rgb(39, 66, 129), 20));
+        brand.addView(label("KC LMS", 24, Color.WHITE, true));
+        gap(brand, 5);
+        brand.addView(label(t("PRIVATE MEDIA SPACE"), 10,
+            Color.rgb(210, 220, 245), true));
+        gap(items, 8);
+        items.addView(brand);
+        gap(items, 15);
+
+        addDrawerItem(items, "◉", t("My Profile"), "Account and user details");
+        addDrawerItem(items, "▤", t("My Files"), "Browse device media");
+        addDrawerItem(items, "▣", t("My Folders"), "Your private collections");
+        addDrawerItem(items, "🔑", t("Password Manager"), "Saved passwords");
+        addDrawerItem(items, "↔", t("Connected Devices"), "Manage connections");
+
+        gap(items, 8);
+        line(items);
+        gap(items, 12);
+        items.addView(label(t("PREFERENCES"), 11, muted, true));
+        gap(items, 6);
+
+        addDrawerItem(items, "⚙", "Settings", "App preferences");
+        addDrawerItem(items, "文", t("App Language"), currentLanguage());
+        addDrawerItem(items, "◐", t("Dark Mode"),
+            prefs.getBoolean("dark_mode", false) ? "On" : "Off");
+
+        gap(items, 8);
+        line(items);
+        gap(items, 12);
+        items.addView(label(t("SECURITY & INFORMATION"), 11, muted, true));
+        gap(items, 6);
+
+        addDrawerItem(items, "♢", t("Privacy Policy"), "How your data is handled");
+        addDrawerItem(items, "ⓘ", t("About KC LMS"), "App information");
+        addDrawerItem(items, "✓", t("App Version"), "Version 1.0");
+
+        gap(items, 18);
+        TextView footer = label("KC LMS  •  Built for your privacy",
+            11, muted, false);
+        footer.setGravity(Gravity.CENTER);
+        items.addView(footer);
+
+        drawer.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private void openDrawer() {
+        View shade = frame.findViewWithTag("drawer_shade");
+        if (shade == null) {
+            shade = new View(this);
+            shade.setTag("drawer_shade");
+            shade.setBackgroundColor(0x99000000);
+            FrameLayout.LayoutParams shadeParams =
+                new FrameLayout.LayoutParams(-1, -1);
+            frame.addView(shade, 1, shadeParams);
+            shade.setOnClickListener(v -> closeDrawer());
+        }
+
+        shade.setVisibility(View.VISIBLE);
+        shade.bringToFront();
+
+        FrameLayout.LayoutParams params =
+            (FrameLayout.LayoutParams) drawer.getTag();
+        params.leftMargin = 0;
+        drawer.setLayoutParams(params);
+        drawer.bringToFront();
+    }
+
+    private void closeDrawer() {
+        if (drawer == null || frame == null) return;
+        FrameLayout.LayoutParams params =
+            (FrameLayout.LayoutParams) drawer.getTag();
+        params.leftMargin = -dp(310);
+        drawer.setLayoutParams(params);
+        View shade = frame.findViewWithTag("drawer_shade");
+        if (shade != null) shade.setVisibility(View.GONE);
+    }
+
+    private void addDrawerItem(LinearLayout parent, String icon,
+                               String title, String subtitle) {
+        LinearLayout item = row();
+        pad(item, 8, 10, 4, 10);
+
+        TextView symbol = label(icon, 19, blue, true);
+        symbol.setGravity(Gravity.CENTER);
+        item.addView(symbol, lp(35, 38));
+
+        LinearLayout texts = column();
+        pad(texts, 10, 0, 0, 0);
+        texts.addView(label(title, 14, ink, true));
+        gap(texts, 2);
+        texts.addView(label(t(subtitle), 10, muted, false));
+        item.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+
+        parent.addView(item);
+        item.setOnClickListener(v -> {
+            closeDrawer();
+
+            if (title.equals(t("App Language"))) {
+                chooseLanguage();
+            } else if (title.equals(t("Dark Mode"))) {
+                toggleDarkMode();
+            } else if (title.equals(t("My Profile"))) {
+                showInfo(t("My Profile"),
+                    t("Profile setup will be added with account security."));
+            } else if (title.equals(t("Password Manager"))) {
+                showInfo(t("Password Manager"),
+                    t("Secure password storage and authenticated viewing are planned next."));
+            } else if (title.equals(t("Privacy Policy"))) {
+                showInfo(t("Privacy Policy"),
+                    t("The full privacy policy will be added before release."));
+            } else if (title.equals(t("App Version"))) {
+                showInfo("KC LMS", "Version 1.0");
+            } else if (title.equals(t("About KC LMS"))) {
+                showInfo(t("About KC LMS"),
+                    "Private media access and secure device connections.");
+            } else {
+                toast(title + " will be implemented in a later stage.");
+            }
+        });
+    }
+
+    private String t(String en) {
+        String lang = currentLanguage();
+        if ("हिंदी".equals(lang)) {
+            switch (en) {
+                case "PRIVATE MEDIA SPACE": return "निजी मीडिया स्पेस";
+                case "Search files, folders...": return "फ़ाइलें और फ़ोल्डर खोजें...";
+                case "Your personal space": return "आपकी निजी जगह";
+                case "Your files. Your privacy. Your control.": return "आपकी फ़ाइलें। आपकी गोपनीयता। आपका नियंत्रण।";
+                case "Connect a device": return "डिवाइस कनेक्ट करें";
+                case "Access your media remotely": return "दूर से अपना मीडिया देखें";
+                case "＋   Connect another device     →": return "＋   दूसरा डिवाइस कनेक्ट करें     →";
+                case "Browse media": return "मीडिया देखें";
+                case "View all": return "सभी देखें";
+                case "Photos": return "फ़ोटो";
+                case "Images": return "तस्वीरें";
+                case "Videos": return "वीडियो";
+                case "Movies": return "फ़िल्में";
+                case "Audio": return "ऑडियो";
+                case "Music & sounds": return "संगीत और आवाज़ें";
+                case "Documents": return "दस्तावेज़";
+                case "PDF & files": return "PDF और फ़ाइलें";
+                case "My folders": return "मेरे फ़ोल्डर";
+                case "+ New folder": return "+ नया फ़ोल्डर";
+                case "Private collection": return "निजी संग्रह";
+                case "Password-protected folder": return "पासवर्ड से सुरक्षित फ़ोल्डर";
+                case "Shared with devices": return "डिवाइस के साथ साझा";
+                case "Your selected media folders": return "आपके चुने हुए मीडिया फ़ोल्डर";
+                case "Recent media": return "हाल का मीडिया";
+                case "See all": return "सभी देखें";
+                case "Your recent files will appear here": return "आपकी हाल की फ़ाइलें यहाँ दिखेंगी";
+                case "Allow media access when the file manager is ready.": return "फ़ाइल मैनेजर तैयार होने पर मीडिया एक्सेस दें।";
+                case "Home": return "होम";
+                case "Files": return "फ़ाइलें";
+                case "Search": return "खोजें";
+                case "Devices": return "डिवाइस";
+                case "Settings": return "सेटिंग्स";
+                case "My Profile": return "मेरी प्रोफ़ाइल";
+                case "My Files": return "मेरी फ़ाइलें";
+                case "My Folders": return "मेरे फ़ोल्डर";
+                case "Password Manager": return "पासवर्ड मैनेजर";
+                case "Connected Devices": return "कनेक्टेड डिवाइस";
+                case "PREFERENCES": return "प्राथमिकताएँ";
+                case "App preferences": return "ऐप की प्राथमिकताएँ";
+                case "App Language": return "ऐप की भाषा";
+                case "Dark Mode": return "डार्क मोड";
+                case "SECURITY & INFORMATION": return "सुरक्षा और जानकारी";
+                case "Privacy Policy": return "गोपनीयता नीति";
+                case "How your data is handled": return "आपका डेटा कैसे संभाला जाता है";
+                case "About KC LMS": return "KC LMS के बारे में";
+                case "App information": return "ऐप की जानकारी";
+                case "App Version": return "ऐप संस्करण";
+                case "Account and user details": return "खाता और उपयोगकर्ता विवरण";
+                case "Browse device media": return "डिवाइस मीडिया देखें";
+                case "Your private collections": return "आपके निजी संग्रह";
+                case "Saved passwords": return "सेव किए गए पासवर्ड";
+                case "Manage connections": return "कनेक्शन प्रबंधित करें";
+                case "Built for your privacy": return "आपकी गोपनीयता के लिए बनाया गया";
+                case "Choose a language": return "भाषा चुनें";
+                case "Cancel": return "रद्द करें";
+                case "OK": return "ठीक है";
+                case "Search KC LMS": return "KC LMS में खोजें";
+                case "Type a file, folder or media name": return "फ़ाइल, फ़ोल्डर या मीडिया का नाम लिखें";
+                case "No matching items found": return "कोई मिलता-जुलता आइटम नहीं मिला";
+                case "Search results": return "खोज परिणाम";
+            }
+        } else if ("ગુજરાતી".equals(lang)) {
+            switch (en) {
+                case "PRIVATE MEDIA SPACE": return "ખાનગી મીડિયા સ્પેસ";
+                case "Search files, folders...": return "ફાઇલો અને ફોલ્ડર શોધો...";
+                case "Your personal space": return "તમારી વ્યક્તિગત જગ્યા";
+                case "Your files. Your privacy. Your control.": return "તમારી ફાઇલો. તમારી ગોપનીયતા. તમારું નિયંત્રણ.";
+                case "Connect a device": return "ડિવાઇસ જોડો";
+                case "Access your media remotely": return "દૂરથી તમારું મીડિયા જુઓ";
+                case "＋   Connect another device     →": return "＋   બીજું ડિવાઇસ જોડો     →";
+                case "Browse media": return "મીડિયા જુઓ";
+                case "View all": return "બધું જુઓ";
+                case "Photos": return "ફોટા";
+                case "Images": return "છબીઓ";
+                case "Videos": return "વિડિયો";
+                case "Movies": return "ફિલ્મો";
+                case "Audio": return "ઑડિયો";
+                case "Music & sounds": return "સંગીત અને અવાજ";
+                case "Documents": return "દસ્તાવેજો";
+                case "PDF & files": return "PDF અને ફાઇલો";
+                case "My folders": return "મારા ફોલ્ડર";
+                case "+ New folder": return "+ નવું ફોલ્ડર";
+                case "Private collection": return "ખાનગી સંગ્રહ";
+                case "Password-protected folder": return "પાસવર્ડથી સુરક્ષિત ફોલ્ડર";
+                case "Shared with devices": return "ડિવાઇસ સાથે શેર કરેલું";
+                case "Your selected media folders": return "તમારા પસંદ કરેલા મીડિયા ફોલ્ડર";
+                case "Recent media": return "તાજેતરનું મીડિયા";
+                case "See all": return "બધું જુઓ";
+                case "Your recent files will appear here": return "તમારી તાજેતરની ફાઇલો અહીં દેખાશે";
+                case "Allow media access when the file manager is ready.": return "ફાઇલ મેનેજર તૈયાર થાય ત્યારે મીડિયા ઍક્સેસ આપો.";
+                case "Home": return "હોમ";
+                case "Files": return "ફાઇલો";
+                case "Search": return "શોધ";
+                case "Devices": return "ડિવાઇસ";
+                case "Settings": return "સેટિંગ્સ";
+                case "My Profile": return "મારી પ્રોફાઇલ";
+                case "My Files": return "મારી ફાઇલો";
+                case "My Folders": return "મારા ફોલ્ડર";
+                case "Password Manager": return "પાસવર્ડ મેનેજર";
+                case "Connected Devices": return "જોડાયેલા ડિવાઇસ";
+                case "PREFERENCES": return "પસંદગીઓ";
+                case "App preferences": return "એપની પસંદગીઓ";
+                case "App Language": return "એપની ભાષા";
+                case "Dark Mode": return "ડાર્ક મોડ";
+                case "SECURITY & INFORMATION": return "સુરક્ષા અને માહિતી";
+                case "Privacy Policy": return "ગોપનીયતા નીતિ";
+                case "How your data is handled": return "તમારો ડેટા કેવી રીતે સંભાળાય છે";
+                case "About KC LMS": return "KC LMS વિશે";
+                case "App information": return "એપની માહિતી";
+                case "App Version": return "એપનું વર્ઝન";
+                case "Account and user details": return "ખાતું અને વપરાશકર્તાની વિગતો";
+                case "Browse device media": return "ડિવાઇસનું મીડિયા જુઓ";
+                case "Your private collections": return "તમારા ખાનગી સંગ્રહ";
+                case "Saved passwords": return "સાચવેલા પાસવર્ડ";
+                case "Manage connections": return "કનેક્શન સંચાલિત કરો";
+                case "Built for your privacy": return "તમારી ગોપનીયતા માટે બનાવેલું";
+                case "Choose a language": return "ભાષા પસંદ કરો";
+                case "Cancel": return "રદ કરો";
+                case "OK": return "બરાબર";
+                case "Search KC LMS": return "KC LMS માં શોધો";
+                case "Type a file, folder or media name": return "ફાઇલ, ફોલ્ડર અથવા મીડિયાનું નામ લખો";
+                case "No matching items found": return "મેળ ખાતી વસ્તુ મળી નથી";
+                case "Search results": return "શોધનાં પરિણામો";
+            }
+        }
+        return en;
+    }
+
+    private void showSearch() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(t("Type a file, folder or media name"));
+        input.setTextColor(ink);
+        input.setHintTextColor(muted);
+
+        LinearLayout wrap = column();
+        pad(wrap, 20, 8, 20, 0);
+        wrap.addView(input);
+
+        new AlertDialog.Builder(this)
+            .setTitle(t("Search KC LMS"))
+            .setView(wrap)
+            .setNegativeButton(t("Cancel"), null)
+            .setPositiveButton(t("Search"), (dialog, which) -> {
+                String q = input.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+                if (q.isEmpty()) {
+                    toast(t("Type a file, folder or media name"));
+                    return;
+                }
+
+                String[] names = {
+                    t("Photos"), t("Videos"), t("Audio"), t("Documents"),
+                    t("Private collection"), t("Shared with devices"),
+                    t("My Files"), t("My Folders"), t("Connected Devices")
+                };
+                StringBuilder matches = new StringBuilder();
+                for (String name : names) {
+                    if (name.toLowerCase(java.util.Locale.ROOT).contains(q)) {
+                        if (matches.length() > 0) matches.append("\n");
+                        matches.append("• ").append(name);
+                    }
+                }
+
+                if (matches.length() == 0) {
+                    matches.append(t("No matching items found"));
+                }
+                new AlertDialog.Builder(this)
+                    .setTitle(t("Search results"))
+                    .setMessage(matches.toString())
+                    .setPositiveButton(t("OK"), null)
+                    .show();
+            })
+            .show();
+    }
+
+    private String currentLanguage() {
+        return prefs == null ? "English" :
+            prefs.getString("language", "English");
+    }
+
+    private void chooseLanguage() {
+        final String[] languages = {"English", "हिंदी", "ગુજરાતી"};
+        new AlertDialog.Builder(this)
+            .setTitle(t("Choose a language"))
+            .setSingleChoiceItems(languages,
+                java.util.Arrays.asList(languages).indexOf(currentLanguage()),
+                (dialog, which) -> {
+                    String selected = languages[which];
+                    prefs.edit().putString("language", selected).apply();
+                    dialog.dismiss();
+                    toast("Language saved: " + selected);
+                    showHome();
+                })
+            .setNegativeButton(t("Cancel"), null)
+            .show();
+    }
+
+    private void toggleDarkMode() {
+        boolean enabled = !prefs.getBoolean("dark_mode", false);
+        prefs.edit().putBoolean("dark_mode", enabled).apply();
+        toast("Dark mode: " + (enabled ? "On" : "Off"));
+        showHome();
+    }
+
+    private void showInfo(String title, String message) {
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show();
     }
 
     private void toast(String message) {
