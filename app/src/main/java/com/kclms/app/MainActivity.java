@@ -187,8 +187,10 @@ private SharedPreferences prefs;
         TextView searchIcon = label("⌕", 25, muted, true);
         search.addView(searchIcon);
         TextView searchText = label(t("Search files, folders..."), 13, muted, false);
-        pad(searchText, 10, 0, 0, 0);
-        search.addView(searchText, new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout.LayoutParams searchTextParams =
+                new LinearLayout.LayoutParams(0, dp(48), 1);
+        searchTextParams.leftMargin = dp(10);
+        search.addView(searchText, searchTextParams);
         TextView filter = label("☷", 21, blue, true);
         search.addView(filter);
         root.addView(search);
