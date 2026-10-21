@@ -5,6 +5,8 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/kc_lms_logo"
+        android:roundIcon="@drawable/kc_lms_logo"
         android:label="KC LMS"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">

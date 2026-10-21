@@ -17,6 +17,9 @@ import android.content.SharedPreferences;
 import android.widget.TextView;
 import android.widget.EditText;
 import android.widget.Toast;
+import android.widget.Switch;
+import java.util.UUID;
+import android.widget.ImageView;
 
 public class MainActivity extends Activity {
 
@@ -135,7 +138,7 @@ private SharedPreferences prefs;
         scroll.setVerticalScrollBarEnabled(false);
 
         root = column();
-        pad(root, 20, 12, 20, 20);
+        pad(root, 16, 0, 16, 20);
         scroll.addView(root);
 
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -158,12 +161,9 @@ private SharedPreferences prefs;
     private void buildHeader() {
         LinearLayout header = row();
 
-        LinearLayout logo = new LinearLayout(this);
-        logo.setGravity(Gravity.CENTER);
-        logo.setBackground(gradient(blue, Color.rgb(113, 83, 248), 15));
-        TextView mark = label("K", 24, Color.WHITE, true);
-        mark.setGravity(Gravity.CENTER);
-        logo.addView(mark);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.kc_lms_logo);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         header.addView(logo, lp(46, 46));
 
         LinearLayout names = column();
@@ -438,7 +438,7 @@ private SharedPreferences prefs;
         drawer = column();
         drawer.setBackgroundColor(surface);
         drawer.setElevation(dp(18));
-        pad(drawer, 20, 24, 20, 18);
+        pad(drawer, 0, 0, 0, 0);
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
             dp(310), -1, Gravity.LEFT
@@ -449,17 +449,28 @@ private SharedPreferences prefs;
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
         LinearLayout items = column();
-        scroll.addView(items);
 
         LinearLayout brand = column();
-        pad(brand, 16, 18, 16, 18);
-        brand.setBackground(gradient(navy, Color.rgb(39, 66, 129), 20));
-        brand.addView(label("KC LMS", 24, Color.WHITE, true));
+        pad(brand, 20, 26, 20, 22);
+        brand.setBackground(gradient(navy, Color.rgb(39, 66, 129), 0));
+
+        ImageView brandLogo = new ImageView(this);
+        brandLogo.setImageResource(R.drawable.kc_lms_logo);
+        brandLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        brand.addView(brandLogo, lp(58, 58));
+
+        gap(brand, 12);
+        String displayName = prefs.getString("display_name", "KC LMS User");
+        brand.addView(label(displayName, 21, Color.WHITE, true));
         gap(brand, 5);
-        brand.addView(label(t("PRIVATE MEDIA SPACE"), 10,
+        brand.addView(label("KC LMS  •  PRIVATE MEDIA SPACE", 10,
             Color.rgb(210, 220, 245), true));
-        gap(items, 8);
+        gap(brand, 10);
+        brand.addView(label("User ID: " + getOrCreateUserId(), 11,
+            Color.rgb(225, 232, 250), false));
+
         items.addView(brand);
         gap(items, 15);
 
@@ -477,8 +488,7 @@ private SharedPreferences prefs;
 
         addDrawerItem(items, "⚙", "Settings", "App preferences");
         addDrawerItem(items, "文", t("App Language"), currentLanguage());
-        addDrawerItem(items, "◐", t("Dark Mode"),
-            prefs.getBoolean("dark_mode", false) ? "On" : "Off");
+        addDarkModeItem(items);
 
         gap(items, 8);
         line(items);
@@ -496,7 +506,45 @@ private SharedPreferences prefs;
         footer.setGravity(Gravity.CENTER);
         items.addView(footer);
 
+        scroll.addView(items);
         drawer.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private String getOrCreateUserId() {
+        String id = prefs.getString("user_id", null);
+        if (id == null || id.isEmpty()) {
+            id = UUID.randomUUID().toString()
+                .replace("-", "").substring(0, 10).toUpperCase();
+            prefs.edit().putString("user_id", id).apply();
+        }
+        return id;
+    }
+
+    private void addDarkModeItem(LinearLayout parent) {
+        LinearLayout item = row();
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        pad(item, 16, 8, 14, 8);
+
+        LinearLayout texts = column();
+        texts.addView(label(t("Dark Mode"), 14, ink, true));
+        gap(texts, 2);
+        texts.addView(label("Switch app appearance", 10, muted, false));
+        item.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+
+        Switch modeSwitch = new Switch(this);
+        modeSwitch.setTextOn("ON");
+        modeSwitch.setTextOff("OFF");
+        modeSwitch.setShowText(true);
+        modeSwitch.setChecked(prefs.getBoolean("dark_mode", false));
+        item.addView(modeSwitch);
+        parent.addView(item);
+
+        modeSwitch.setOnCheckedChangeListener((button, enabled) -> {
+            prefs.edit().putBoolean("dark_mode", enabled).apply();
+            showHome();
+        });
+        item.setOnClickListener(v ->
+            modeSwitch.setChecked(!modeSwitch.isChecked()));
     }
 
     private void openDrawer() {
@@ -556,8 +604,7 @@ private SharedPreferences prefs;
             } else if (title.equals(t("Dark Mode"))) {
                 toggleDarkMode();
             } else if (title.equals(t("My Profile"))) {
-                showInfo(t("My Profile"),
-                    t("Profile setup will be added with account security."));
+                showProfileDialog();
             } else if (title.equals(t("Password Manager"))) {
                 showInfo(t("Password Manager"),
                     t("Secure password storage and authenticated viewing are planned next."));
@@ -781,6 +828,30 @@ private SharedPreferences prefs;
         prefs.edit().putBoolean("dark_mode", enabled).apply();
         toast("Dark mode: " + (enabled ? "On" : "Off"));
         showHome();
+    }
+
+    private void showProfileDialog() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Enter your display name");
+        input.setText(prefs.getString("display_name", "KC LMS User"));
+        input.setSelection(input.getText().length());
+
+        new AlertDialog.Builder(this)
+            .setTitle(t("My Profile"))
+            .setMessage("Your name is shown in the navigation drawer.")
+            .setView(input)
+            .setPositiveButton("Save", (dialog, which) -> {
+                String name = input.getText().toString().trim();
+                if (name.isEmpty()) {
+                    name = "KC LMS User";
+                }
+                prefs.edit().putString("display_name", name).apply();
+                toast("Profile saved");
+                showHome();
+            })
+            .setNegativeButton(t("Cancel"), null)
+            .show();
     }
 
     private void showInfo(String title, String message) {
