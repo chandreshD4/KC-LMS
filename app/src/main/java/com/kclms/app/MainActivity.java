@@ -138,7 +138,7 @@ private SharedPreferences prefs;
         scroll.setVerticalScrollBarEnabled(false);
 
         root = column();
-        pad(root, 16, 0, 16, 20);
+        pad(root, 16, 10, 16, 20);
         scroll.addView(root);
 
         screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -168,7 +168,7 @@ private SharedPreferences prefs;
 
         LinearLayout names = column();
         pad(names, 11, 0, 0, 0);
-        names.addView(label("KC LMS", 21, navy, true));
+        names.addView(label("KC LMS", 21, ink, true));
         names.addView(label(t("PRIVATE MEDIA SPACE"), 9, muted, true));
         header.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
 
@@ -184,6 +184,7 @@ private SharedPreferences prefs;
         LinearLayout search = row();
         pad(search, 14, 0, 12, 0);
         search.setBackground(shape(surface, 15));
+        search.setElevation(dp(2));
         TextView searchIcon = label("⌕", 25, muted, true);
         search.addView(searchIcon);
         TextView searchText = label(t("Search files, folders..."), 13, muted, false);
@@ -199,10 +200,10 @@ private SharedPreferences prefs;
     }
 
     private void buildWelcome() {
-        root.addView(label(t("Your personal space"), 25, navy, true));
+        root.addView(label(t("Your personal space"), 25, ink, true));
         gap(root, 4);
         root.addView(label(
-            "Your files. Your privacy. Your control.",
+            t("Your files. Your privacy. Your control."),
             13, muted, false
         ));
         gap(root, 20);
@@ -253,7 +254,7 @@ private SharedPreferences prefs;
     private void sectionHeading(String title, String action,
                                 Runnable callback) {
         LinearLayout r = row();
-        r.addView(label(title, 19, navy, true),
+        r.addView(label(title, 19, ink, true),
             new LinearLayout.LayoutParams(0, -2, 1));
         TextView more = label(action, 12, blue, true);
         more.setGravity(Gravity.CENTER);
