@@ -533,9 +533,7 @@ private SharedPreferences prefs;
         item.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
 
         Switch modeSwitch = new Switch(this);
-        modeSwitch.setTextOn("ON");
-        modeSwitch.setTextOff("OFF");
-        modeSwitch.setShowText(true);
+        modeSwitch.setShowText(false);
         modeSwitch.setChecked(prefs.getBoolean("dark_mode", false));
         item.addView(modeSwitch);
         parent.addView(item);
