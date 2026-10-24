@@ -1,6 +1,22 @@
 package com.kclms.app;
 
 import android.app.Activity;
+import android.Manifest;
+import android.content.ContentUris;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.MediaStore;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.Settings;
+import android.view.MotionEvent;
+import android.webkit.MimeTypeMap;
+import java.io.File;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import androidx.core.content.FileProvider;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -22,6 +38,12 @@ import java.util.UUID;
 import android.widget.ImageView;
 
 public class MainActivity extends Activity {
+    private String pendingMediaType = "images";
+    private String pendingSearchQuery = "";
+    private boolean pendingStorageSearch = false;
+    private File pendingPrivateFolder;
+
+
 
     private int navy = Color.rgb(17, 27, 54);
     private int blue = Color.rgb(54, 100, 244);
@@ -112,6 +134,429 @@ private SharedPreferences prefs;
         showHome();
     }
 
+
+    private float edgeStartX = 0;
+    private float edgeStartY = 0;
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            edgeStartX = event.getX();
+            edgeStartY = event.getY();
+        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+            float dx = event.getX() - edgeStartX;
+            float dy = Math.abs(event.getY() - edgeStartY);
+            if (edgeStartX <= dp(24) && dx >= dp(90) && dy <= dp(80)
+                    && drawer != null && frame != null) {
+                openDrawer();
+                return true;
+            }
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    private void showFilesMenu() {
+        String[] options = {"Photos", "Videos", "Audio", "Documents", "Search files"};
+        new AlertDialog.Builder(this)
+            .setTitle(t("Files"))
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) openMediaBrowser("images");
+                else if (which == 1) openMediaBrowser("videos");
+                else if (which == 2) openMediaBrowser("audio");
+                else if (which == 3) openMediaBrowser("documents");
+                else showSearch();
+            })
+            .setNegativeButton(t("Cancel"), null)
+            .show();
+    }
+
+    private void showSettings() {
+        String[] options = {"My Profile", "App Language", "Dark Mode", "About KC LMS"};
+        new AlertDialog.Builder(this)
+            .setTitle(t("Settings"))
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) showProfileDialog();
+                else if (which == 1) chooseLanguage();
+                else if (which == 2) toggleDarkMode();
+                else showInfo(t("About KC LMS"), "KC LMS — Version 1.0");
+            })
+            .setNegativeButton(t("Cancel"), null)
+            .show();
+    }
+
+    private void createPrivateFolder() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Folder name");
+        new AlertDialog.Builder(this)
+            .setTitle("Create private folder")
+            .setMessage("This folder is stored in KC LMS app-private storage.")
+            .setView(input)
+            .setNegativeButton(t("Cancel"), null)
+            .setPositiveButton("Create", (dialog, which) -> {
+                String name = input.getText().toString().trim();
+                if (name.isEmpty() || name.equals(".") || name.equals("..")
+                        || name.contains("/") || name.contains("\\")) {
+                    toast("Enter a valid folder name.");
+                    return;
+                }
+                File base = new File(getFilesDir(), "collections");
+                File folder = new File(base, name);
+                if ((!base.exists() && !base.mkdirs())
+                        || (!folder.exists() && !folder.mkdir())) {
+                    toast("Could not create folder.");
+                    return;
+                }
+                toast("Private folder created: " + name);
+                showPrivateCollections();
+            })
+            .show();
+    }
+
+    private void showPrivateCollections() {
+    File base = new File(getFilesDir(), "collections");
+    if (!base.exists() && !base.mkdirs()) {
+        toast("Could not open private folders.");
+        return;
+    }
+    File[] folders = base.listFiles(File::isDirectory);
+    if (folders == null) {
+        toast("Could not read private folders.");
+        return;
+    }
+    java.util.Arrays.sort(folders,
+        (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+
+    String[] names = new String[folders.length + 1];
+    names[0] = "+ New folder";
+    for (int i = 0; i < folders.length; i++) {
+        names[i + 1] = folders[i].getName();
+    }
+
+    new AlertDialog.Builder(this)
+        .setTitle("Private folders")
+        .setItems(names, (dialog, which) -> {
+            if (which == 0) {
+                createPrivateFolder();
+            } else {
+                showPrivateFolderContents(folders[which - 1]);
+            }
+        })
+        .setNegativeButton(t("Cancel"), null)
+        .show();
+}
+
+private void showPrivateFolderContents(File folder) {
+    File base = new File(getFilesDir(), "collections");
+    try {
+        String root = base.getCanonicalPath() + File.separator;
+        String selected = folder.getCanonicalPath();
+        if (!selected.startsWith(root) || !folder.isDirectory()) {
+            toast("Invalid private folder.");
+            return;
+        }
+    } catch (java.io.IOException e) {
+        toast("Could not open private folder.");
+        return;
+    }
+
+    File[] contents = folder.listFiles();
+    if (contents == null) {
+        toast("Could not read this folder.");
+        return;
+    }
+    java.util.Arrays.sort(contents, (a, b) -> {
+        if (a.isDirectory() != b.isDirectory()) {
+            return a.isDirectory() ? -1 : 1;
+        }
+        return a.getName().compareToIgnoreCase(b.getName());
+    });
+
+    String[] labels = new String[contents.length + 1];
+    labels[0] = "+ Add file";
+    for (int i = 0; i < contents.length; i++) {
+        labels[i + 1] = (contents[i].isDirectory() ? "[Folder] " : "[File] ")
+            + contents[i].getName();
+    }
+
+    new AlertDialog.Builder(this)
+        .setTitle(folder.getName())
+        .setItems(labels, (dialog, which) -> {
+            if (which == 0) {
+                pendingPrivateFolder = folder;
+                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                pick.setType("*/*");
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                try {
+                    startActivityForResult(pick, 414);
+                } catch (Exception e) {
+                    pendingPrivateFolder = null;
+                    toast("Unable to open the document picker.");
+                }
+            } else {
+                File chosen = contents[which - 1];
+                if (chosen.isDirectory()) {
+                    showPrivateFolderContents(chosen);
+                } else {
+                    openPrivateCollectionFile(chosen);
+                }
+            }
+        })
+        .setNegativeButton(t("Cancel"), null)
+        .show();
+}
+
+private void openPrivateCollectionFile(File file) {
+    if (file == null || !file.isFile()) {
+        toast("File is no longer available.");
+        return;
+    }
+    try {
+        Uri uri = FileProvider.getUriForFile(
+            this, getPackageName() + ".fileprovider", file);
+        String name = file.getName();
+        int dot = name.lastIndexOf('.');
+        String ext = dot >= 0
+            ? name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT) : "";
+        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+        if (mime == null) mime = "*/*";
+
+        Intent view = new Intent(Intent.ACTION_VIEW);
+        view.setDataAndType(uri, mime);
+        view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(view);
+    } catch (Exception e) {
+        toast("No compatible app can open this file.");
+    }
+}
+
+private String safeImportedFileName(String name) {
+    if (name == null || name.trim().isEmpty()) name = "Imported file";
+    name = name.replace('\\', '/');
+    int slash = name.lastIndexOf('/');
+    if (slash >= 0) name = name.substring(slash + 1);
+    name = name.replaceAll("[\\p{Cntrl}]", "_").trim();
+    if (name.isEmpty() || name.equals(".") || name.equals("..")) {
+        name = "Imported file";
+    }
+    return name;
+}
+
+private File uniqueDestination(File folder, String name) {
+    File destination = new File(folder, name);
+    if (!destination.exists()) return destination;
+
+    int dot = name.lastIndexOf('.');
+    String stem = dot > 0 ? name.substring(0, dot) : name;
+    String extension = dot > 0 ? name.substring(dot) : "";
+    for (int i = 2; i < 10000; i++) {
+        destination = new File(folder, stem + " (" + i + ")" + extension);
+        if (!destination.exists()) return destination;
+    }
+    return null;
+}
+
+private void importPrivateDocument(Uri uri, File folder) {
+    if (uri == null || folder == null || !folder.isDirectory()) {
+        toast("Choose a valid private folder first.");
+        return;
+    }
+
+    String name = null;
+    try (Cursor cursor = getContentResolver().query(
+            uri,
+            new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+            null, null, null)) {
+        if (cursor != null && cursor.moveToFirst()) {
+            int column = cursor.getColumnIndex(
+                android.provider.OpenableColumns.DISPLAY_NAME);
+            if (column >= 0) name = cursor.getString(column);
+        }
+    } catch (Exception ignored) {
+        // Fall back to a safe generic name if provider metadata is unavailable.
+    }
+
+    name = safeImportedFileName(name);
+    File destination = uniqueDestination(folder, name);
+    if (destination == null) {
+        toast("Could not choose a unique file name.");
+        return;
+    }
+
+    try (java.io.InputStream input = getContentResolver().openInputStream(uri);
+         java.io.FileOutputStream output =
+             new java.io.FileOutputStream(destination)) {
+        if (input == null) throw new java.io.IOException("No input stream");
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            output.write(buffer, 0, count);
+        }
+        output.flush();
+        toast("File saved in private folder.");
+        showPrivateFolderContents(folder);
+    } catch (Exception e) {
+        // Remove a partial copy so it is not mistaken for a complete import.
+        if (destination.exists()) destination.delete();
+        toast("Could not import this file.");
+    }
+}
+
+private void shareSelectedDocument(Uri uri) {
+    if (uri == null) {
+        toast("No file selected.");
+        return;
+    }
+    try {
+        String mime = getContentResolver().getType(uri);
+        if (mime == null) mime = "*/*";
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType(mime);
+        send.putExtra(Intent.EXTRA_STREAM, uri);
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(Intent.createChooser(send, "Share file"));
+    } catch (Exception e) {
+        toast("Unable to share this file.");
+    }
+}
+
+private void openConnectionSettings(String action) {
+    try {
+        startActivity(new Intent(action));
+    } catch (Exception e) {
+        try {
+            startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
+        } catch (Exception ignored) {
+            toast("Connection settings are not available on this device.");
+        }
+    }
+}
+
+private void showConnectedDevices() {
+    String[] choices = {
+        "Bluetooth settings",
+        "Wi-Fi settings",
+        "Wireless and network settings",
+        "Share a file"
+    };
+    new AlertDialog.Builder(this)
+        .setTitle(t("Connected Devices"))
+        .setMessage("Manage connections in Android settings, or choose a file to share with a compatible app or nearby-device service.")
+        .setItems(choices, (dialog, which) -> {
+            if (which == 0) {
+                openConnectionSettings(Settings.ACTION_BLUETOOTH_SETTINGS);
+            } else if (which == 1) {
+                openConnectionSettings(Settings.ACTION_WIFI_SETTINGS);
+            } else if (which == 2) {
+                openConnectionSettings(Settings.ACTION_WIRELESS_SETTINGS);
+            } else {
+                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                pick.setType("*/*");
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                try {
+                    startActivityForResult(pick, 415);
+                } catch (Exception e) {
+                    toast("Unable to open the document picker.");
+                }
+            }
+        })
+        .setNegativeButton(t("Cancel"), null)
+        .show();
+}
+
+
+    private void showRecentMedia() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            String[] required = Build.VERSION.SDK_INT >= 34
+                ? new String[]{
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_AUDIO,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+                }
+                : new String[]{
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_AUDIO
+                };
+            java.util.ArrayList<String> missing = new java.util.ArrayList<>();
+            for (String permission : required) {
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                    missing.add(permission);
+                }
+            }
+            if (!missing.isEmpty()) {
+                pendingMediaType = "recent";
+                requestPermissions(missing.toArray(new String[0]), 413);
+                return;
+            }
+        } else if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingMediaType = "recent";
+            requestPermissions(
+                new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 413);
+            return;
+        }
+        queryRecentMedia();
+    }
+
+    private void queryRecentMedia() {
+        ArrayList<String> names = new ArrayList<>();
+        ArrayList<Uri> uris = new ArrayList<>();
+        ArrayList<String> mimes = new ArrayList<>();
+        Uri collection = MediaStore.Files.getContentUri("external");
+        String[] columns = {
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.MEDIA_TYPE
+        };
+        String selection = MediaStore.Files.FileColumns.MEDIA_TYPE + " IN (?,?,?)";
+        String[] args = {
+            String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE),
+            String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO),
+            String.valueOf(MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO)
+        };
+        try (Cursor c = getContentResolver().query(
+                collection, columns, selection, args,
+                MediaStore.MediaColumns.DATE_ADDED + " DESC")) {
+            if (c != null) {
+                int idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                int nameCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+                int mimeCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
+                while (c.moveToNext() && names.size() < 100) {
+                    long id = c.getLong(idCol);
+                    String name = c.getString(nameCol);
+                    names.add(name == null ? "Media file" : name);
+                    uris.add(ContentUris.withAppendedId(collection, id));
+                    String mime = c.getString(mimeCol);
+                    mimes.add(mime == null ? "*/*" : mime);
+                }
+            }
+        } catch (Exception e) {
+            toast("Could not read recent media. Check media permissions.");
+            return;
+        }
+        if (names.isEmpty()) {
+            showInfo(t("Recent media"), "No accessible recent media was found.");
+            return;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle(t("Recent media"))
+            .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                Intent view = new Intent(Intent.ACTION_VIEW);
+                view.setDataAndType(uris.get(which), mimes.get(which));
+                view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivity(view);
+                } catch (Exception e) {
+                    toast("No compatible app can open this media.");
+                }
+            })
+            .setNegativeButton(t("Cancel"), null)
+            .show();
+    }
+
     private void showHome() {
         prefs = getSharedPreferences("kc_lms_settings", MODE_PRIVATE);
         darkMode = prefs.getBoolean("dark_mode", false);
@@ -169,7 +614,7 @@ private SharedPreferences prefs;
         LinearLayout names = column();
         pad(names, 11, 0, 0, 0);
         names.addView(label("KC LMS", 21, ink, true));
-        names.addView(label(t("PRIVATE MEDIA SPACE"), 9, muted, true));
+        names.addView(label(t("LIVE MEDIA SPACE"), 9, muted, true));
         header.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
 
         TextView menu = label("☰", 25, Color.WHITE, true);
@@ -195,7 +640,7 @@ private SharedPreferences prefs;
         TextView filter = label("☷", 21, blue, true);
         search.addView(filter);
         root.addView(search);
-        search.setOnClickListener(v -> toast("Search will be connected to the media browser."));
+        search.setOnClickListener(v -> showSearch());
         gap(root, 20);
     }
 
@@ -210,46 +655,43 @@ private SharedPreferences prefs;
     }
 
     private void buildConnectionCard() {
-        LinearLayout card = column();
-        pad(card, 19, 20, 19, 19);
-        card.setBackground(gradient(navy, Color.rgb(38, 64, 124), 23));
+    LinearLayout card = column();
+    pad(card, 19, 20, 19, 19);
+    card.setBackground(gradient(navy, Color.rgb(38, 64, 124), 23));
 
-        LinearLayout top = row();
+    LinearLayout top = row();
+    LinearLayout iconBox = new LinearLayout(this);
+    iconBox.setGravity(Gravity.CENTER);
+    iconBox.setBackground(shape(Color.rgb(48, 65, 111), 14));
+    TextView icon = label("↔", 29, Color.WHITE, true);
+    icon.setGravity(Gravity.CENTER);
+    iconBox.addView(icon);
+    top.addView(iconBox, lp(54, 54));
 
-        LinearLayout iconBox = new LinearLayout(this);
-        iconBox.setGravity(Gravity.CENTER);
-        iconBox.setBackground(shape(Color.rgb(48, 65, 111), 14));
-        TextView icon = label("↔", 29, Color.WHITE, true);
-        icon.setGravity(Gravity.CENTER);
-        iconBox.addView(icon);
-        top.addView(iconBox, lp(54, 54));
+    LinearLayout titleBox = column();
+    pad(titleBox, 13, 0, 0, 0);
+    titleBox.addView(label(t("Connect a device"), 18, Color.WHITE, true));
+    gap(titleBox, 4);
+    titleBox.addView(label(
+        "Open Bluetooth, Wi-Fi or share a file",
+        12, Color.rgb(206, 218, 246), false
+    ));
+    top.addView(titleBox, new LinearLayout.LayoutParams(0, -2, 1));
+    card.addView(top);
+    gap(card, 17);
 
-        LinearLayout titleBox = column();
-        pad(titleBox, 13, 0, 0, 0);
-        titleBox.addView(label(t("Connect a device"), 18, Color.WHITE, true));
-        gap(titleBox, 4);
-        titleBox.addView(label(
-            "Access your media remotely",
-            12, Color.rgb(206, 218, 246), false
-        ));
-        top.addView(titleBox, new LinearLayout.LayoutParams(0, -2, 1));
+    TextView button = label(t("＋   Connect another device     →"), 14,
+        navy, true);
+    button.setGravity(Gravity.CENTER);
+    button.setBackground(shape(Color.WHITE, 14));
+    card.addView(button, lp(-1, 49));
+    button.setOnClickListener(v -> showConnectedDevices());
 
-        card.addView(top);
-        gap(card, 17);
+    gap(root, 24);
+    root.addView(card);
+    gap(root, 25);
+}
 
-        TextView button = label(t("＋   Connect another device     →"), 14,
-            navy, true);
-        button.setGravity(Gravity.CENTER);
-        button.setBackground(shape(Color.WHITE, 14));
-        card.addView(button, lp(-1, 49));
-        button.setOnClickListener(v -> toast(
-            "Device connection will be added in a later stage."
-        ));
-
-        gap(root, 24);
-        root.addView(card);
-        gap(root, 25);
-    }
 
     private void sectionHeading(String title, String action,
                                 Runnable callback) {
@@ -266,7 +708,7 @@ private SharedPreferences prefs;
 
     private void buildMediaSection() {
         sectionHeading(t("Browse media"), "View all", () ->
-            toast("Media browser will be added later.")
+            openMediaBrowser("images")
         );
 
         LinearLayout first = row();
@@ -311,22 +753,28 @@ private SharedPreferences prefs;
         params.setMargins(dp(4), 0, dp(4), 0);
         parent.addView(card, params);
 
-        card.setOnClickListener(v -> toast(
-            title + " browsing will be added later."
-        ));
+        card.setOnClickListener(v -> {
+            if (title.equals(t("Photos"))) {
+                openMediaBrowser("images");
+            } else if (title.equals(t("Videos"))) {
+                openMediaBrowser("videos");
+            } else if (title.equals(t("Audio"))) {
+                openMediaBrowser("audio");
+            } else if (title.equals(t("Documents"))) {
+                openMediaBrowser("documents");
+            }
+        });
     }
 
     private void buildFoldersSection() {
-        sectionHeading(t("My folders"), "+ New folder", () ->
-            toast("Folder creation will be added later.")
-        );
+        sectionHeading(t("My folders"), "+ New folder", () -> createPrivateFolder());
 
         LinearLayout card = column();
         pad(card, 15, 3, 15, 3);
         card.setBackground(shape(surface, 19));
 
         addFolderRow(card, "▰", t("Private collection"),
-            "Password-protected folder", blue);
+            "Stored privately inside KC LMS", blue);
         line(card);
         addFolderRow(card, "▰", t("Shared with devices"),
             "Your selected media folders", Color.rgb(127, 86, 220));
@@ -356,40 +804,28 @@ private SharedPreferences prefs;
         r.addView(arrow);
         parent.addView(r);
 
-        r.setOnClickListener(v -> toast(
-            "Folder access will be available after implementation."
-        ));
+        r.setOnClickListener(v -> {
+            if (title.equals(t("Private collection"))) {
+                showPrivateCollections();
+            } else {
+                showConnectedDevices();
+            }
+        });
     }
 
+
     private void buildRecentSection() {
-        sectionHeading(t("Recent media"), "See all", () ->
-            toast("Recent media will appear when file access is implemented.")
-        );
-
-        LinearLayout empty = column();
-        empty.setGravity(Gravity.CENTER);
-        pad(empty, 15, 22, 15, 22);
-        empty.setBackground(shape(surface, 19));
-
-        TextView icon = label("▤", 30, blue, true);
-        icon.setGravity(Gravity.CENTER);
-        empty.addView(icon, lp(56, 52));
-
-        gap(empty, 8);
-        TextView title = label(t("Your recent files will appear here"),
-            14, ink, true);
-        title.setGravity(Gravity.CENTER);
-        empty.addView(title);
-
-        gap(empty, 5);
-        TextView description = label(
-            "Allow media access when the file manager is ready.",
-            11, muted, false
-        );
-        description.setGravity(Gravity.CENTER);
-        empty.addView(description);
-
-        root.addView(empty);
+        sectionHeading(t("Recent media"), "See all", () -> showRecentMedia());
+        LinearLayout card = column();
+        pad(card, 15, 14, 15, 14);
+        card.setBackground(shape(surface, 19));
+        TextView title = label("Recently added photos, videos and audio", 13, ink, true);
+        card.addView(title);
+        gap(card, 5);
+        TextView subtitle = label("Tap to view the latest media on this device.", 11, muted, false);
+        card.addView(subtitle);
+        card.setOnClickListener(v -> showRecentMedia());
+        root.addView(card);
         gap(root, 20);
     }
 
@@ -398,43 +834,38 @@ private SharedPreferences prefs;
         bottomNav.setBackgroundColor(surface);
         bottomNav.setElevation(dp(12));
         pad(bottomNav, 5, 7, 5, 7);
-
         addNavItem("⌂", t("Home"), true);
         addNavItem("▤", t("Files"), false);
         addNavItem("⌕", t("Search"), false);
         addNavItem("↔", t("Devices"), false);
         addNavItem("⚙", t("Settings"), false);
-
         screen.addView(bottomNav, new LinearLayout.LayoutParams(-1, dp(66)));
     }
 
     private void addNavItem(String icon, String title, boolean selected) {
         LinearLayout item = column();
         item.setGravity(Gravity.CENTER);
-
-        TextView symbol = label(icon, 22,
-            selected ? blue : muted, true);
+        TextView symbol = label(icon, 22, selected ? blue : muted, true);
         symbol.setGravity(Gravity.CENTER);
         item.addView(symbol);
-
-        TextView caption = label(title, 10,
-            selected ? blue : muted, selected);
+        TextView caption = label(title, 10, selected ? blue : muted, selected);
         caption.setGravity(Gravity.CENTER);
         item.addView(caption);
-
-        bottomNav.addView(item,
-            new LinearLayout.LayoutParams(0, -1, 1));
-
+        bottomNav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
         item.setOnClickListener(v -> {
             if (title.equals(t("Search"))) {
                 showSearch();
-            } else if (!title.equals(t("Home"))) {
-                toast(title + " screen will be implemented later.");
+            } else if (title.equals(t("Files"))) {
+                showFilesMenu();
+            } else if (title.equals(t("Devices"))) {
+                showConnectedDevices();
+            } else if (title.equals(t("Settings"))) {
+                showSettings();
+            } else {
+                showHome();
             }
         });
     }
-
-
     private void buildDrawer() {
         drawer = column();
         drawer.setBackgroundColor(surface);
@@ -453,24 +884,61 @@ private SharedPreferences prefs;
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout items = column();
 
-        LinearLayout brand = column();
-        pad(brand, 20, 26, 20, 22);
+        LinearLayout brand = row();
+        pad(brand, 16, 22, 16, 22);
         brand.setBackground(gradient(navy, Color.rgb(39, 66, 129), 0));
 
         ImageView brandLogo = new ImageView(this);
         brandLogo.setImageResource(R.drawable.kc_lms_logo);
         brandLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        brand.addView(brandLogo, lp(58, 58));
+        LinearLayout.LayoutParams logoParams = lp(58, 58);
+        logoParams.rightMargin = dp(12);
+        brand.addView(brandLogo, logoParams);
 
-        gap(brand, 12);
+        LinearLayout profileDetails = column();
+        profileDetails.setGravity(Gravity.CENTER_VERTICAL);
         String displayName = prefs.getString("display_name", "KC LMS User");
-        brand.addView(label(displayName, 21, Color.WHITE, true));
-        gap(brand, 5);
-        brand.addView(label("KC LMS  •  PRIVATE MEDIA SPACE", 10,
-            Color.rgb(210, 220, 245), true));
-        gap(brand, 10);
-        brand.addView(label("User ID: " + getOrCreateUserId(), 11,
-            Color.rgb(225, 232, 250), false));
+
+        TextView profileName = label(displayName, 18, Color.WHITE, true);
+        profileName.setMaxLines(2);
+        profileName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        profileDetails.addView(profileName);
+
+        LinearLayout userIdRow = row();
+        TextView userIdText = label("ID: " + getOrCreateUserId(),
+            11, Color.rgb(50, 205, 110), true);
+        userIdText.setSingleLine(true);
+        userIdText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        userIdRow.addView(userIdText,
+            new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView copyIcon = label("⧉", 19, Color.WHITE, true);
+        copyIcon.setGravity(Gravity.CENTER);
+        copyIcon.setContentDescription("Copy User ID");
+        copyIcon.setOnClickListener(v -> {
+            String id = getOrCreateUserId();
+            android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager)
+                getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("KC LMS User ID", id));
+                toast("User ID copied");
+            } else {
+                toast("Could not copy User ID");
+            }
+        });
+        userIdRow.addView(copyIcon, lp(30, 30));
+        profileDetails.addView(userIdRow);
+
+        TextView brandSubtitle = label("LIVE MEDIA SPACE", 10,
+            Color.rgb(210, 220, 245), true);
+        brandSubtitle.setMaxLines(1);
+        brandSubtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        profileDetails.addView(brandSubtitle);
+
+        brand.addView(profileDetails,
+            new LinearLayout.LayoutParams(0, -2, 1));
 
         items.addView(brand);
         gap(items, 15);
@@ -614,9 +1082,17 @@ private SharedPreferences prefs;
                 showInfo("KC LMS", "Version 1.0");
             } else if (title.equals(t("About KC LMS"))) {
                 showInfo(t("About KC LMS"),
-                    "Private media access and secure device connections.");
+                    "KC LMS media organizer with private folders and system connection shortcuts.");
+            } else if (title.equals(t("My Files"))) {
+                showFilesMenu();
+            } else if (title.equals(t("My Folders"))) {
+                showPrivateCollections();
+            } else if (title.equals(t("Connected Devices"))) {
+                showConnectedDevices();
+            } else if (title.equals("Settings")) {
+                showSettings();
             } else {
-                toast(title + " will be implemented in a later stage.");
+                toast(title + " is not available yet.");
             }
         });
     }
@@ -625,6 +1101,7 @@ private SharedPreferences prefs;
         String lang = currentLanguage();
         if ("हिंदी".equals(lang)) {
             switch (en) {
+                case "LIVE MEDIA SPACE": return "लाइव मीडिया स्पेस";
                 case "PRIVATE MEDIA SPACE": return "निजी मीडिया स्पेस";
                 case "Search files, folders...": return "फ़ाइलें और फ़ोल्डर खोजें...";
                 case "Your personal space": return "आपकी निजी जगह";
@@ -645,7 +1122,7 @@ private SharedPreferences prefs;
                 case "My folders": return "मेरे फ़ोल्डर";
                 case "+ New folder": return "+ नया फ़ोल्डर";
                 case "Private collection": return "निजी संग्रह";
-                case "Password-protected folder": return "पासवर्ड से सुरक्षित फ़ोल्डर";
+                case "Stored privately inside KC LMS": return "KC LMS के निजी स्टोरेज में सहेजा गया";
                 case "Shared with devices": return "डिवाइस के साथ साझा";
                 case "Your selected media folders": return "आपके चुने हुए मीडिया फ़ोल्डर";
                 case "Recent media": return "हाल का मीडिया";
@@ -688,6 +1165,7 @@ private SharedPreferences prefs;
             }
         } else if ("ગુજરાતી".equals(lang)) {
             switch (en) {
+                case "LIVE MEDIA SPACE": return "લાઇવ મીડિયા સ્પેસ";
                 case "PRIVATE MEDIA SPACE": return "ખાનગી મીડિયા સ્પેસ";
                 case "Search files, folders...": return "ફાઇલો અને ફોલ્ડર શોધો...";
                 case "Your personal space": return "તમારી વ્યક્તિગત જગ્યા";
@@ -708,7 +1186,7 @@ private SharedPreferences prefs;
                 case "My folders": return "મારા ફોલ્ડર";
                 case "+ New folder": return "+ નવું ફોલ્ડર";
                 case "Private collection": return "ખાનગી સંગ્રહ";
-                case "Password-protected folder": return "પાસવર્ડથી સુરક્ષિત ફોલ્ડર";
+                case "Stored privately inside KC LMS": return "KC LMS ના ખાનગી સ્ટોરેજમાં સંગ્રહિત";
                 case "Shared with devices": return "ડિવાઇસ સાથે શેર કરેલું";
                 case "Your selected media folders": return "તમારા પસંદ કરેલા મીડિયા ફોલ્ડર";
                 case "Recent media": return "તાજેતરનું મીડિયા";
@@ -766,36 +1244,16 @@ private SharedPreferences prefs;
 
         new AlertDialog.Builder(this)
             .setTitle(t("Search KC LMS"))
+            .setMessage("Searches shared-storage filenames, folders, photos, videos and audio. Some protected Android folders may be unavailable.")
             .setView(wrap)
             .setNegativeButton(t("Cancel"), null)
             .setPositiveButton(t("Search"), (dialog, which) -> {
-                String q = input.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+                String q = input.getText().toString().trim();
                 if (q.isEmpty()) {
                     toast(t("Type a file, folder or media name"));
                     return;
                 }
-
-                String[] names = {
-                    t("Photos"), t("Videos"), t("Audio"), t("Documents"),
-                    t("Private collection"), t("Shared with devices"),
-                    t("My Files"), t("My Folders"), t("Connected Devices")
-                };
-                StringBuilder matches = new StringBuilder();
-                for (String name : names) {
-                    if (name.toLowerCase(java.util.Locale.ROOT).contains(q)) {
-                        if (matches.length() > 0) matches.append("\n");
-                        matches.append("• ").append(name);
-                    }
-                }
-
-                if (matches.length() == 0) {
-                    matches.append(t("No matching items found"));
-                }
-                new AlertDialog.Builder(this)
-                    .setTitle(t("Search results"))
-                    .setMessage(matches.toString())
-                    .setPositiveButton(t("OK"), null)
-                    .show();
+                startMediaSearch(q);
             })
             .show();
     }
@@ -864,4 +1322,362 @@ private SharedPreferences prefs;
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
+
+
+    private void startMediaSearch(String query) {
+        pendingSearchQuery = query;
+        if (Build.VERSION.SDK_INT >= 33) {
+            String[] permissions = {
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO
+            };
+            java.util.ArrayList<String> missing = new java.util.ArrayList<>();
+            for (String permission : permissions) {
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                    missing.add(permission);
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 34
+                    && (missing.contains(Manifest.permission.READ_MEDIA_IMAGES)
+                        || missing.contains(Manifest.permission.READ_MEDIA_VIDEO))
+                    && checkSelfPermission(
+                        Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                        != PackageManager.PERMISSION_GRANTED) {
+                missing.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED);
+            }
+            if (!missing.isEmpty()) {
+                if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
+                    searchDeviceMedia(query);
+                    return;
+                }
+                requestPermissions(missing.toArray(new String[0]), 412);
+                return;
+            }
+        } else if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
+                searchDeviceMedia(query);
+                return;
+            }
+            requestPermissions(
+                new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 412);
+            return;
+        }
+        searchDeviceMedia(query);
+    }
+
+    private void searchDeviceMedia(String query) {
+        String q = query.toLowerCase(java.util.Locale.ROOT);
+        java.util.ArrayList<String> names = new java.util.ArrayList<>();
+        java.util.ArrayList<Uri> uris = new java.util.ArrayList<>();
+        java.util.ArrayList<String> mimeTypes = new java.util.ArrayList<>();
+        java.util.ArrayList<File> localFiles = new java.util.ArrayList<>();
+        Uri[] sources = {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        };
+        String[] types = {"image/*", "video/*", "audio/*"};
+        String[] permissions = {
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO
+        };
+
+        for (int i = 0; i < sources.length; i++) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                boolean hasMediaPermission =
+                    checkSelfPermission(permissions[i]) == PackageManager.PERMISSION_GRANTED;
+                if (!hasMediaPermission && Build.VERSION.SDK_INT >= 34 && i < 2) {
+                    hasMediaPermission = checkSelfPermission(
+                        Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                        == PackageManager.PERMISSION_GRANTED;
+                }
+                if (!hasMediaPermission) continue;
+            } else if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                continue;
+            }
+
+            Uri source = sources[i];
+            String[] columns = {
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME
+            };
+            try (Cursor c = getContentResolver().query(
+                    source, columns, null, null,
+                    MediaStore.MediaColumns.DATE_ADDED + " DESC")) {
+                if (c == null) continue;
+                int idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                int nameCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+                while (c.moveToNext() && names.size() < 200) {
+                    String name = c.getString(nameCol);
+                    if (name != null &&
+                            name.toLowerCase(java.util.Locale.ROOT).contains(q)) {
+                        names.add(name);
+                        uris.add(ContentUris.withAppendedId(source, c.getLong(idCol)));
+                                    localFiles.add(null);
+                        mimeTypes.add(types[i]);
+                    }
+                }
+            } catch (Exception e) {
+                android.util.Log.w("KCLMS", "Media search source failed", e);
+            }
+            if (names.size() >= 200) break;
+        }
+
+        if (Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()) {
+            for (File f : UniversalFileSearch.search(query, 100)) {
+                if (names.size() >= 200) break;
+                names.add((f.isDirectory() ? "[Folder] " : "[File] ") + f.getName());
+                uris.add(null);
+                localFiles.add(f);
+                mimeTypes.add(null);
+            }
+        }
+        if (names.isEmpty()) {
+            AlertDialog.Builder noResults = new AlertDialog.Builder(this)
+                    .setTitle("Search results")
+                    .setMessage("No matching files found. Check permissions or try another filename.")
+                    .setPositiveButton("OK", null);
+            if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+                noResults.setNeutralButton("Enable file search", (d, w) -> requestAllFilesAccess());
+            }
+            noResults.show();
+            return;
+        }
+
+        AlertDialog.Builder resultsDialog = new AlertDialog.Builder(this)
+                .setTitle("Search results (" + names.size() + ")")
+                .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                    if (localFiles.get(which) != null) { openSearchFile(localFiles.get(which)); return; }
+                    Intent view = new Intent(Intent.ACTION_VIEW);
+                    view.setDataAndType(uris.get(which), mimeTypes.get(which));
+                    view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    try { startActivity(view); }
+                    catch (Exception e) { toast("No app can open this file."); }
+                })
+                .setNegativeButton("Close", null);
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            resultsDialog.setNeutralButton("Enable file search", (d, w) -> requestAllFilesAccess());
+        }
+        resultsDialog.show();
+    }
+
+    private void openSearchFile(File file) {
+        if (file == null || !file.exists()) { toast("File is no longer available."); return; }
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children == null) { toast("Cannot access this folder."); return; }
+            java.util.Arrays.sort(children, (x, y) -> Boolean.compare(y.isDirectory(), x.isDirectory()));
+            int count = Math.min(children.length, 150);
+            String[] labels = new String[count];
+            for (int i = 0; i < count; i++) labels[i] = (children[i].isDirectory() ? "[Folder] " : "[File] ") + children[i].getName();
+            new AlertDialog.Builder(this).setTitle(file.getName()).setItems(labels, (dialog, which) -> openSearchFile(children[which])).setNegativeButton("Close", null).show();
+            return;
+        }
+        try {
+            String name = file.getName();
+            int dot = name.lastIndexOf(".");
+            String ext = dot >= 0 ? name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT) : "";
+            String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (mime == null) mime = "*/*";
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, mime);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(view);
+        } catch (Exception e) { toast("No compatible app can open this file."); }
+    }
+
+    private void requestAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < 30) return;
+        pendingStorageSearch = true;
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception first) {
+            try { startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)); }
+            catch (Exception second) { pendingStorageSearch = false; toast("Unable to open All files access settings."); }
+        }
+    }
+
+    private void openMediaBrowser(String type) {
+        if ("documents".equals(type)) {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.setType("*/*");
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(i, 410);
+            return;
+        }
+
+        String permission;
+        if (Build.VERSION.SDK_INT >= 33) {
+            permission = "audio".equals(type)
+                ? Manifest.permission.READ_MEDIA_AUDIO
+                : ("videos".equals(type)
+                    ? Manifest.permission.READ_MEDIA_VIDEO
+                    : Manifest.permission.READ_MEDIA_IMAGES);
+        } else {
+            permission = Manifest.permission.READ_EXTERNAL_STORAGE;
+        }
+
+        boolean hasPermission =
+            checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+        boolean visualType = !"audio".equals(type);
+        if (!hasPermission && Build.VERSION.SDK_INT >= 34 && visualType) {
+            hasPermission = checkSelfPermission(
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        if (!hasPermission) {
+            pendingMediaType = type;
+            if (Build.VERSION.SDK_INT >= 34 && visualType) {
+                requestPermissions(new String[]{
+                    permission,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+                }, 411);
+            } else {
+                requestPermissions(new String[]{permission}, 411);
+            }
+            return;
+        }
+        showMediaList(type);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == 414) {
+            File targetFolder = pendingPrivateFolder;
+            pendingPrivateFolder = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                importPrivateDocument(data.getData(), targetFolder);
+            }
+        } else if (requestCode == 415) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                shareSelectedDocument(data.getData());
+            }
+        } else if (requestCode == 410) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                shareSelectedDocument(data.getData());
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pendingStorageSearch) {
+            pendingStorageSearch = false;
+            if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) toast("All files access not enabled; media search is still available.");
+            if (!pendingSearchQuery.isEmpty()) startMediaSearch(pendingSearchQuery);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == 413) {
+            boolean granted = false;
+            for (int result : results) {
+                if (result == PackageManager.PERMISSION_GRANTED) {
+                    granted = true;
+                    break;
+                }
+            }
+            if (granted) queryRecentMedia();
+            else toast("Media permission was not granted.");
+        } else if (requestCode == 412) {
+            boolean granted = false;
+            for (int result : results) {
+                if (result == PackageManager.PERMISSION_GRANTED) {
+                    granted = true;
+                    break;
+                }
+            }
+            if (!granted) {
+                toast("Media permission was not granted; showing other accessible files.");
+            }
+            searchDeviceMedia(pendingSearchQuery);
+        } else if (requestCode == 411) {
+            boolean granted = false;
+            for (int result : results) {
+                if (result == PackageManager.PERMISSION_GRANTED) {
+                    granted = true;
+                    break;
+                }
+            }
+            if (granted) showMediaList(pendingMediaType);
+            else toast("Media permission was not granted.");
+        }
+    }
+
+    private void showMediaList(String type) {
+        Uri collection;
+        String mime;
+        if ("videos".equals(type)) {
+            collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            mime = "video/*";
+        } else if ("audio".equals(type)) {
+            collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+            mime = "audio/*";
+        } else {
+            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            mime = "image/*";
+        }
+
+        java.util.ArrayList<String> names = new java.util.ArrayList<>();
+        java.util.ArrayList<Uri> uris = new java.util.ArrayList<>();
+        String[] columns = {
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME
+        };
+
+        try (Cursor c = getContentResolver().query(
+                collection, columns, null, null,
+                MediaStore.MediaColumns.DATE_ADDED + " DESC")) {
+            if (c != null) {
+                int idCol = c.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns._ID);
+                int nameCol = c.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns.DISPLAY_NAME);
+                while (c.moveToNext() && names.size() < 100) {
+                    long id = c.getLong(idCol);
+                    String name = c.getString(nameCol);
+                    names.add(name == null ? "Media file" : name);
+                    uris.add(ContentUris.withAppendedId(collection, id));
+                }
+            }
+        } catch (Exception e) {
+            toast("Could not read media: " + e.getMessage());
+            return;
+        }
+
+        if (names.isEmpty()) {
+            showInfo("Media", "No matching files were found on this device.");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("audio".equals(type) ? "Audio"
+                : ("videos".equals(type) ? "Videos" : "Photos"))
+            .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                Intent view = new Intent(Intent.ACTION_VIEW);
+                view.setDataAndType(uris.get(which), mime);
+                view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivity(view);
+                } catch (Exception e) {
+                    toast("No app can open this file.");
+                }
+            })
+            .setNegativeButton("Close", null)
+            .show();
+    }
+
 }
